@@ -2,6 +2,7 @@ package com.twitter.finagle.dispatch
 
 import com.twitter.finagle.Service
 import com.twitter.finagle.context.Contexts
+import com.twitter.finagle.tracing._//{Annotation, Record, SpanId, Trace, TraceId, Tracer}
 import com.twitter.finagle.transport.Transport
 import com.twitter.util.{Future, Promise, Time, Local}
 import java.security.cert.X509Certificate
@@ -200,3 +201,139 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     verify(service).close(any[Time])
   })
 }
+
+@RunWith(classOf[JUnitRunner])
+class AnnotatedServerDispatcherTest extends FunSuite with MockitoSugar {
+  trait Ctx {
+    val trans = mock[Transport[String, String]]
+    when(trans.peerCertificate).thenReturn(None)
+    when(trans.onClose).thenReturn(Future.never)
+    val readp = new Promise[String]
+    when(trans.read()).thenReturn(readp)
+    val writep = new Promise[Unit]
+    when(trans.write(any[String])).thenReturn(writep)
+  }
+    //def traced(f: => Unit): Seq[Record] = {
+    //  val b = new BufferingTracer
+    //  Trace.letTracer(b)(f)
+    //  b.toSeq
+    //}
+
+  test("Foo one at a time") ( new Ctx {
+    val b = new BufferingTracer()
+    Trace.letTracer(b) {
+      val service = mock[Service[String, String]]
+      when(service.close(any[Time])).thenReturn(Future.Done)
+      val _ = new SerialServerDispatcher(trans, service)
+
+      val servicep = new Promise[String]
+      when(service(any[String])).thenReturn(servicep)
+
+      readp.setValue("ok")
+      verify(service).apply("ok")
+      verify(trans, never()).write(any[String])
+
+      servicep.setValue("ack")
+      verify(trans).write("ack")
+
+      verify(trans).read()
+
+      when(trans.read()).thenReturn(new Promise[String]) // to short circuit
+      writep.setDone()
+
+      verify(trans, times(2)).read()
+    }
+  })
+
+
+    //val service = mock[Service[String, String]]
+    //when(service.close(any[Time])).thenReturn(Future.Done)
+    //val tracer1 = mock[Tracer]
+
+    //Trace.letTracer(tracer1) {
+    //  val ann = Annotation.Message("hello")
+    //  Trace.record(ann)
+    //  verify(tracer1, times(1)).record(any[Record])
+    //}
+    //val servicep = new Promise[String]
+    //when(service(any[String])).thenReturn(servicep)
+
+    //readp.setValue("ok")
+    //verify(service).apply("ok")
+    //verify(trans, never()).write(any[String])
+
+  //  servicep.setValue("ack")
+  //  verify(trans).write("ack")
+
+  //  verify(trans).read()
+  //  when(trans.read()).thenReturn(new Promise[String]) // to short circuit
+  //  writep.setDone()
+
+  //  verify(trans, times(2)).read()
+
+
+  //test("Verify AnnotatedDispatcher dispatches one at a time") (new Ctx {
+  //  val service = mock[Service[String, String]]
+  //  when(service.close(any[Time])).thenReturn(Future.Done)
+  //  val _ = new SerialServerDispatcher(trans, service)
+
+  //  verify(trans).read()
+  //  verify(trans, never()).write(any[String])
+  //  verify(service, never()).apply(any[String])
+
+  //   val servicep = new Promise[String]
+  //   when(service(any[String])).thenReturn(servicep)
+
+  //  readp.setValue("ok")
+  //  verify(service).apply("ok")
+  //  verify(trans, never()).write(any[String])
+
+  //  servicep.setValue("ack")
+  //  verify(trans).write("ack")
+
+  //  verify(trans).read()
+
+  //  when(trans.read()).thenReturn(new Promise[String]) // to short circuit
+  //  writep.setDone()
+
+  //  verify(trans, times(2)).read()
+  //})
+
+  //test("Verify AnnotatedDispatcher injects the transport certificate if present") (new Ctx {
+  //  val mockCert = mock[X509Certificate]
+  //  when(trans.peerCertificate).thenReturn(Some(mockCert))
+  //  val service = new Service[String, String] {
+  //    override def apply(request: String): Future[String] = Future.value {
+  //      if (Contexts.local.get(Transport.peerCertCtx) == Some(mockCert)) "ok" else "not ok"
+  //    }
+  //  }
+
+  //  val _ = new AnnotatedServerDispatcher(new SerialServerDispatcher(trans, service))
+
+  //  readp.setValue("go")
+  //  verify(trans).write("ok")
+  //})
+
+  //test("Verify AnnoatedDispatcher clears and delimits com.twitter.util.Local") (new Ctx {
+  //  val l = new Local[String]
+  //  var ncall = 0
+
+  //  val s = new Service[String, String] {
+  //    def apply(req: String) = {
+  //      ncall += 1
+  //      val prev = l() getOrElse "undefined"
+  //      l() = req
+  //      Future.value(prev)
+  //    }
+  //  }
+
+  //  l() = "orig"
+  //  val _ = new AnnotatedServerDispatcher(new SerialServerDispatcher(trans, s))
+
+  //  readp.setValue("blah")
+  //  assert(ncall == 1)
+  //  assert(l() == Some("orig"))
+  //  verify(trans).write("undefined")
+  //})
+}
+
