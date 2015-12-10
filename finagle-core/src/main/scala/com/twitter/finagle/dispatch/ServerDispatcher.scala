@@ -27,12 +27,6 @@ trait ServerDispatcher[Req, Rep, Out] {
    */
   protected def dispatch(req: Out, eos: Promise[Unit]): Future[Rep]
   protected def handle(rep: Rep): Future[Unit]
-
-  /**
-    * Returns the TraceId for a generic request. Request types may store 
-    * Trace information in any manner.
-   */
-  protected def traceIdFromRequest(req: Out): TraceId = Trace.id
 }
 
 /**
@@ -48,14 +42,18 @@ trait ServerDispatcherAnnotator[Req, Rep, Out, A <: ServerDispatcher[Req, Rep, O
   private[this] val RecordWireSend: Unit => Unit = _ => Trace.record(Annotation.WireSend)
 
   protected def annotatedDispatch(req: Out, eos: Promise[Unit]): Future[Rep] = {
-    Trace.letId(self.traceIdFromRequest(req)) {
-      Trace.record(Annotation.WireRecv)
-      self.dispatch(req, eos)
-    }
+    Trace.record(Annotation.WireRecv)
+    self.dispatch(req, eos)
   }
 
   protected def annotatedHandle(rep: Rep): Future[Unit] =
     self.handle(rep).onSuccess { RecordWireSend }
+
+  /**
+    * Returns the TraceId for a generic request. Request types may store 
+    * Trace information in any manner.
+   */
+  protected def traceIdFromRequest(req: Out): TraceId = Trace.id
 }
 
 object GenSerialServerDispatcher {
@@ -71,10 +69,19 @@ object GenSerialServerDispatcher {
  * allowing the implementor to furnish custom dispatchers & handlers.
  */
 abstract class GenSerialServerDispatcher
-  [Req, Rep, In, Out, A <: GenSerialServerDispatcher[Req, Rep, In, Out, A]](trans: Transport[In, Out])
-    extends Closable 
-    with ServerDispatcher[Req, Rep, Out]
-    with ServerDispatcherAnnotator[Req, Rep, Out, GenSerialServerDispatcher[Req, Rep, In, Out, A]] {
+  [Req, Rep, In, Out, A <: GenSerialServerDispatcher[Req, Rep, In, Out, A]]
+  (trans: Transport[In, Out])
+  (implicit f: (Out) => TraceId = (o: Out) => Trace.id ) // we take an implicit function of
+                                                         // Request Type => TraceId and provide
+                                                         // a default implementation. Implicit
+                                                         // resolution order will give us the furthest
+                                                         // sub-type implicit, allowing us to easily
+                                                         // provide an implicit for this at the Concrete
+                                                         // level, i.e. Http or Thrift
+
+  extends Closable
+  with ServerDispatcher[Req, Rep, Out]
+  with ServerDispatcherAnnotator[Req, Rep, Out, GenSerialServerDispatcher[Req, Rep, In, Out, A]] {
 
   import GenSerialServerDispatcher._
 
@@ -84,18 +91,20 @@ abstract class GenSerialServerDispatcher
   private[this] def loop(): Future[Unit] = {
     state.set(Idle)
     trans.read() flatMap { req =>
-      val p = new Promise[Rep]
-      if (state.compareAndSet(Idle, p)) {
-        val eos = new Promise[Unit]
-        val save = Local.save()
-        try trans.peerCertificate match {
-          case None => p.become(annotatedDispatch(req, eos))
-          case Some(cert) => Contexts.local.let(Transport.peerCertCtx, cert) {
-            p.become(annotatedDispatch(req, eos))
-          }
-        } finally Local.restore(save)
-        p map { res => (res, eos) }
-      } else Eof
+      Trace.letId(f(req)) {
+        val p = new Promise[Rep]
+        if (state.compareAndSet(Idle, p)) {
+          val eos = new Promise[Unit]
+          val save = Local.save()
+          try trans.peerCertificate match {
+            case None => p.become(annotatedDispatch(req, eos))
+            case Some(cert) => Contexts.local.let(Transport.peerCertCtx, cert) {
+              p.become(annotatedDispatch(req, eos))
+            }
+          } finally Local.restore(save)
+          p map { res => (res, eos) }
+        } else Eof
+      }
     } flatMap { case (rep, eos) =>
       Future.join(annotatedHandle(rep), eos).unit
     } respond {
@@ -141,7 +150,9 @@ abstract class GenSerialServerDispatcher
 class SerialServerDispatcher[Req, Rep](
     trans: Transport[Rep, Req],
     service: Service[Req, Rep])
-    extends GenSerialServerDispatcher[Req, Rep, Rep, Req, SerialServerDispatcher[Req, Rep]](trans) {
+    (implicit f: (Req) => TraceId = (r: Req) => Trace.id)
+    extends GenSerialServerDispatcher[Req, Rep, Rep, Req, SerialServerDispatcher[Req, Rep]] (trans) {
+  
 
   trans.onClose ensure {
     service.close()

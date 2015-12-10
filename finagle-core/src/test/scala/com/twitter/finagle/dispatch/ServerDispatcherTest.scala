@@ -224,6 +224,10 @@ class AnnotatedServerDispatcherTest extends FunSuite with MockitoSugar {
     Trace.letTracer(b) {
       val service = mock[Service[String, String]]
       when(service.close(any[Time])).thenReturn(Future.Done)
+      implicit val f = (s: String) => {
+        println("your new hotness f!")
+        Trace.id
+      }
       val _ = new SerialServerDispatcher(trans, service)
 
       val servicep = new Promise[String]
