@@ -137,13 +137,7 @@ class SerialServerDispatcher[Req, Rep](
     service.close()
   }
 
-  protected def dispatch(req: Req, eos: Promise[Unit]) = {
-    println("Serial ServerDispatcher dispatch")
-    service(req) ensure eos.setDone()
-  }
+  protected def dispatch(req: Req, eos: Promise[Unit]) = service(req) ensure eos.setDone()
 
-  protected def handle(rep: Rep) = {
-    println("Serial ServerDispatcher handle")
-    trans.write(rep)
-  }
+  protected def handle(rep: Rep) = trans.write(rep)
 }
