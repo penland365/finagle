@@ -2,13 +2,12 @@ package com.twitter.finagle.dispatch
 
 import com.twitter.finagle.context.Contexts
 import com.twitter.finagle.tracing.{Annotation, Trace, TraceId}
-import com.twitter.finagle.transport.Transport
+import com.twitter.finagle.transport.{TracedTransport, Transport}
 import com.twitter.finagle.{Service, NoStacktrace, CancelledRequestException}
 import com.twitter.util._
 import java.util.concurrent.atomic.AtomicReference
 
-abstract class ServerDispatcher[Req,Rep,Out](config: ServerDispatcherConfig[Out]) extends Closable {
-  private[this] val RecordWireSend: Unit => Unit = _ => Trace.record(Annotation.WireSend)
+abstract class ServerDispatcher[Req,Rep,In,Out](trans: TracedTransport[In, Out]) extends Closable {
 
   /**
    * Dispatches a request. The first argument is the request. The second
@@ -23,23 +22,6 @@ abstract class ServerDispatcher[Req,Rep,Out](config: ServerDispatcherConfig[Out]
    */
   protected def dispatch(req: Out, eos: Promise[Unit]): Future[Rep]
   protected def handle(rep: Rep): Future[Unit]
-
-  protected def wrappedDispatch(req: Out, eos: Promise[Unit]): Future[Rep] = 
-    config.traceEnabled match {
-      case true => {
-        val traceId = config.f(req)
-        Trace.letId(traceId) {
-          Trace.record(Annotation.WireRecv)
-          dispatch(req, eos)
-        }
-      }
-      case false => dispatch(req, eos)
-  }
-
-  protected def wrappedHandle(rep: Rep): Future[Unit] = config.traceEnabled match {
-    case true  => handle(rep).onSuccess { RecordWireSend }
-    case false => handle(rep)
-  }
 }
 
 case class ServerDispatcherConfig[A](f: (A) => TraceId, traceEnabled: Boolean, underTest: Boolean)
@@ -57,9 +39,8 @@ object GenSerialServerDispatcher {
  * [[com.twitter.finagle.dispatch.SerialServerDispatcher SerialServerDispatcher]],
  * allowing the implementor to furnish custom dispatchers & handlers.
  */
-abstract class GenSerialServerDispatcher [Req, Rep, In, Out](trans: Transport[In, Out],
-  config: ServerDispatcherConfig[Out])
-  extends ServerDispatcher[Req, Rep, Out](config) {
+abstract class GenSerialServerDispatcher [Req, Rep, In, Out](trans: TracedTransport[In, Out],
+  underTest: Boolean = false) extends ServerDispatcher[Req, Rep, In, Out](trans) {
 
   import GenSerialServerDispatcher._
 
@@ -74,15 +55,15 @@ abstract class GenSerialServerDispatcher [Req, Rep, In, Out](trans: Transport[In
         val eos = new Promise[Unit]
         val save = Local.save()
         try trans.peerCertificate match {
-          case None => p.become(wrappedDispatch(req, eos))
+          case None => p.become(dispatch(req, eos))
           case Some(cert) => Contexts.local.let(Transport.peerCertCtx, cert) {
-            p.become(wrappedDispatch(req, eos))
+            p.become(dispatch(req, eos))
           }
         } finally Local.restore(save)
         p map { res => (res, eos) }
       } else Eof
     } flatMap { case (rep, eos) =>
-      Future.join(wrappedHandle(rep), eos).unit
+      Future.join(handle(rep), eos).unit
     } respond {
       case Return(()) if state.get ne Closed =>
         loop()
@@ -93,7 +74,7 @@ abstract class GenSerialServerDispatcher [Req, Rep, In, Out](trans: Transport[In
   }
 
   // Clear all locals to start the loop unless being tested; we want a clean slate.
-  private[this] val looping = config.underTest match {
+  private[this] val looping = underTest match {
     case false => Local.letClear { loop() }
     case true  => loop()
   }
@@ -123,9 +104,9 @@ abstract class GenSerialServerDispatcher [Req, Rep, In, Out](trans: Transport[In
  * Transport errors are considered fatal; the service will be
  * released after any error.
  */
-class SerialServerDispatcher[Req, Rep](trans: Transport[Rep, Req], service: Service[Req, Rep],
-    config: ServerDispatcherConfig[Req] = ServerDispatcherConfig((r: Req) => { Trace.id },
-    false, false)) extends GenSerialServerDispatcher[Req, Rep, Rep, Req](trans, config) {
+class SerialServerDispatcher[Req, Rep](trans: TracedTransport[Rep, Req], service: Service[Req, Rep],
+  underTest: Boolean = false) extends GenSerialServerDispatcher[Req, Rep, Rep, Req] (
+  trans, underTest) {
 
   trans.onClose ensure {
     service.close()

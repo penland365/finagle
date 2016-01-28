@@ -3,7 +3,7 @@ package com.twitter.finagle.dispatch
 import com.twitter.finagle.context.Contexts
 import com.twitter.finagle.Service
 import com.twitter.finagle.tracing.{Flags, Record, SpanId, Trace, Tracer, TraceId}
-import com.twitter.finagle.transport.Transport
+import com.twitter.finagle.transport.{TracedTransport, Transport}
 import com.twitter.util.{Future, Promise, Time, Local}
 import java.security.cert.X509Certificate
 import org.junit.runner.RunWith
@@ -46,7 +46,10 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     val readp = new Promise[String]
     when(trans.read()).thenReturn(readp)
 
-    val disp = new SerialServerDispatcher(trans, service)
+    val f = (s: String) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+    //val tracedTrans = mock[TracedTransport[String, String]] //new TracedTransport(trans, f)
+    val tracedTrans = new TracedTransport(trans, f)
+    val disp = new SerialServerDispatcher(tracedTrans, service, true)
   }
 
 
@@ -66,7 +69,7 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     readp.setValue("ok")
     verify(service, times(0)).apply(any[String])
     // This falls through.
-    verify(trans).close()
+    verify(trans).close(any[Time])
     verify(service).close(any[Time])
   })
 
@@ -95,7 +98,9 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     val readp = new Promise[String]
     when(trans.read()).thenReturn(readp)
 
-    val disp = new SerialServerDispatcher(trans, service)
+    val f = (s: String) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+    val tracedTrans = new TracedTransport(trans, f)
+    val disp = new SerialServerDispatcher(tracedTrans, service, true)
     verify(trans).read()
   }
 
@@ -134,7 +139,7 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     verify(trans, times(0)).close()
 
     writep.setDone()
-    verify(trans).close()
+    verify(trans).close(any[Time])
     onClose.setValue(new Exception("closed!"))
     verify(service).close(any[Time])
   })
@@ -145,8 +150,8 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
       val service = mock[Service[String, String]]
       when(service.close(any[Time])).thenReturn(Future.Done)
       val f = (s: String) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
-      val config = new ServerDispatcherConfig[String](f, true, true)
-      val disp = new SerialServerDispatcher(trans, service, config)
+      val tracedTrans = new TracedTransport(trans, f)
+      val disp = new SerialServerDispatcher(tracedTrans, service, true)
 
       verify(trans).read()
       verify(trans, never()).write(any[String])
@@ -178,8 +183,8 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
       val service = mock[Service[String, String]]
       when(service.close(any[Time])).thenReturn(Future.Done)
       val f = (s: String) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
-      val config = new ServerDispatcherConfig[String](f, false, true)
-      val disp = new SerialServerDispatcher(trans, service, config)
+      val tracedTrans = new TracedTransport(trans, f)
+      val disp = new SerialServerDispatcher(tracedTrans, service, false)
 
       val servicep = new Promise[String]
       when(service(any[String])).thenReturn(servicep)
