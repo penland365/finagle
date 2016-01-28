@@ -7,7 +7,7 @@ import com.twitter.finagle.{Service, NoStacktrace, CancelledRequestException}
 import com.twitter.util._
 import java.util.concurrent.atomic.AtomicReference
 
-abstract class ServerDispatcher[Req,Rep,In,Out](trans: TracedTransport[In, Out]) extends Closable {
+abstract class ServerDispatcher[Req, Rep, In,Out](trans: TracedTransport[In, Out]) extends Closable {
 
   /**
    * Dispatches a request. The first argument is the request. The second
@@ -23,8 +23,6 @@ abstract class ServerDispatcher[Req,Rep,In,Out](trans: TracedTransport[In, Out])
   protected def dispatch(req: Out, eos: Promise[Unit]): Future[Rep]
   protected def handle(rep: Rep): Future[Unit]
 }
-
-case class ServerDispatcherConfig[A](f: (A) => TraceId, traceEnabled: Boolean, underTest: Boolean)
 
 object GenSerialServerDispatcher {
   private val Eof = Future.exception(new Exception("EOF") with NoStacktrace)
