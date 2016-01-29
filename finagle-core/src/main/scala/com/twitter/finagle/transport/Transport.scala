@@ -9,7 +9,32 @@ import com.twitter.util.{Closable, Future, Promise, Time, Throw, Return, Duratio
 import java.net.SocketAddress
 import java.security.cert.Certificate
 
+import com.twitter.finagle.tracing.{Annotation, Trace, TraceId}
+
 // Mapped: ideally via a util-codec?
+
+final class TracedTransport[In, Out](trans: Transport[In, Out], f: (Out) => TraceId)
+  extends Transport[In, Out] {
+
+  def read(): Future[Out] = trans.read() flatMap { req =>
+    val traceId = f(req)
+    Trace.letId(traceId) {
+      Trace.record(Annotation.WireRecv)
+      Future.value(req)
+    }
+  }
+
+  def write(req: In): Future[Unit] = trans.write(req).onSuccess { RecordWireSend }
+
+  def localAddress: SocketAddress          = trans.localAddress
+  def remoteAddress: SocketAddress         = trans.remoteAddress
+  def status: Status                       = trans.status
+  val onClose: Future[Throwable]           = trans.onClose
+  def peerCertificate: Option[Certificate] = trans.peerCertificate
+  def close(deadline: Time): Future[Unit]  = trans.close(deadline)
+
+  private[this] val RecordWireSend: Unit => Unit = _ => Trace.record(Annotation.WireSend)
+}
 
 /**
  * A transport is a representation of a stream of objects that may be

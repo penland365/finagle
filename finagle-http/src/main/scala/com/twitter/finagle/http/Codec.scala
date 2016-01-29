@@ -7,7 +7,7 @@ import com.twitter.finagle.http.codec._
 import com.twitter.finagle.http.filter.{ClientContextFilter, DtabFilter, HttpNackFilter, ServerContextFilter}
 import com.twitter.finagle.stats.{NullStatsReceiver, StatsReceiver}
 import com.twitter.finagle.tracing._
-import com.twitter.finagle.transport.Transport
+import com.twitter.finagle.transport.{TracedTransport, Transport}
 import com.twitter.util.{Closable, StorageUnit, Try}
 import org.jboss.netty.channel.{Channel, ChannelEvent, ChannelHandlerContext, ChannelPipelineFactory, Channels, UpstreamMessageEvent}
 import org.jboss.netty.handler.codec.http._
@@ -217,9 +217,11 @@ case class Http(
 
       override def newServerDispatcher(
         transport: Transport[Any, Any],
-        service: Service[Request, Response]
-      ): Closable =
-        new HttpServerDispatcher(new HttpTransport(transport), service)
+        service: Service[Request, Response],
+        f: (Any) => TraceId = HttpServerDispatcher.traceIdFromReq
+      ): Closable = new HttpServerDispatcher(
+          new TracedTransport(new HttpTransport(transport), f),
+          service)
 
       override def prepareConnFactory(
         underlying: ServiceFactory[Request, Response]

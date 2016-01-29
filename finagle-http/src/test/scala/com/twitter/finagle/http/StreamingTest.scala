@@ -16,6 +16,9 @@ import org.scalatest.FunSuite
 import org.scalatest.concurrent.Eventually
 import org.scalatest.junit.JUnitRunner
 
+import com.twitter.finagle.tracing.TraceId
+import com.twitter.finagle.http.codec.HttpServerDispatcher
+
 @RunWith(classOf[JUnitRunner])
 class StreamingTest extends FunSuite with Eventually {
 
@@ -353,7 +356,8 @@ object StreamingTest {
           codec.newClientDispatcher(cmod(transport), params)
         override def newServerDispatcher(
           transport: Transport[Any, Any],
-          service: Service[Request, Response]
+          service: Service[Request, Response],
+          f: (Any) => TraceId = HttpServerDispatcher.traceIdFromReq
         ) = codec.newServerDispatcher(smod(transport), service)
       }
 

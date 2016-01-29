@@ -6,7 +6,7 @@ import com.twitter.finagle.http._
 import com.twitter.finagle.http.netty.Bijections._
 import com.twitter.finagle.netty3.ChannelBufferBuf
 import com.twitter.finagle.stats.{StatsReceiver, DefaultStatsReceiver, RollupStatsReceiver}
-import com.twitter.finagle.transport.Transport
+import com.twitter.finagle.transport.{TracedTransport, Transport}
 import com.twitter.io.{Reader, BufReader}
 import com.twitter.logging.Logger
 import com.twitter.util.{Future, Promise, Throwables}
@@ -14,13 +14,15 @@ import java.net.InetSocketAddress
 import org.jboss.netty.handler.codec.frame.TooLongFrameException
 import org.jboss.netty.handler.codec.http.{HttpRequest, HttpResponse}
 
+import com.twitter.finagle.tracing.{SpanId, Trace, TraceId}
+
 class HttpServerDispatcher(
-  trans: Transport[Any, Any],
+  trans: TracedTransport[Any, Any],
   service: Service[Request, Response],
   stats: StatsReceiver) extends GenSerialServerDispatcher[Request, Response, Any, Any](trans) {
 
   def this(
-    trans: Transport[Any, Any],
+    trans: TracedTransport[Any, Any],
     service: Service[Request, Response]) = this(trans, service, DefaultStatsReceiver)
 
   private[this] val failureReceiver = new RollupStatsReceiver(stats.scope("stream")).scope("failures")
@@ -130,5 +132,12 @@ class HttpServerDispatcher(
           rep.headers.set(Fields.Connection, "close")
         }
     }
+  }
+}
+
+object HttpServerDispatcher {
+  val traceIdFromReq: (Any) => TraceId = (a: Any) =>  a match {
+    case reqIn: HttpRequest => Trace.id //reqIn.headers.get(HttpTracing.Header.TraceId)
+    case _ => Trace.id
   }
 }

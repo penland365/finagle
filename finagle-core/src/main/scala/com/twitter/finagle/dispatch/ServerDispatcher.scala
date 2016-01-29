@@ -1,30 +1,13 @@
 package com.twitter.finagle.dispatch
 
 import com.twitter.finagle.context.Contexts
-import com.twitter.finagle.transport.Transport
+import com.twitter.finagle.tracing.{Annotation, Trace, TraceId}
+import com.twitter.finagle.transport.{TracedTransport, Transport}
 import com.twitter.finagle.{Service, NoStacktrace, CancelledRequestException}
 import com.twitter.util._
 import java.util.concurrent.atomic.AtomicReference
 
-object GenSerialServerDispatcher {
-  private val Eof = Future.exception(new Exception("EOF") with NoStacktrace)
-  // We don't use Future.never here, because object equality is important here
-  private val Idle = new NoFuture
-  private val Closed = new NoFuture
-}
-
-/**
- * A generic version of
- * [[com.twitter.finagle.dispatch.SerialServerDispatcher SerialServerDispatcher]],
- * allowing the implementor to furnish custom dispatchers & handlers.
- */
-abstract class GenSerialServerDispatcher[Req, Rep, In, Out](trans: Transport[In, Out])
-    extends Closable {
-
-  import GenSerialServerDispatcher._
-
-  private[this] val state = new AtomicReference[Future[_]](Idle)
-  private[this] val cancelled = new CancelledRequestException
+abstract class ServerDispatcher[Req, Rep, In,Out](trans: TracedTransport[In, Out]) extends Closable {
 
   /**
    * Dispatches a request. The first argument is the request. The second
@@ -39,6 +22,28 @@ abstract class GenSerialServerDispatcher[Req, Rep, In, Out](trans: Transport[In,
    */
   protected def dispatch(req: Out, eos: Promise[Unit]): Future[Rep]
   protected def handle(rep: Rep): Future[Unit]
+}
+
+object GenSerialServerDispatcher {
+  private val Eof = Future.exception(new Exception("EOF") with NoStacktrace)
+  // We don't use Future.never here, because object equality is important here
+  private val Idle = new NoFuture
+  private val Closed = new NoFuture
+
+}
+
+/**
+ * A generic version of
+ * [[com.twitter.finagle.dispatch.SerialServerDispatcher SerialServerDispatcher]],
+ * allowing the implementor to furnish custom dispatchers & handlers.
+ */
+abstract class GenSerialServerDispatcher [Req, Rep, In, Out](trans: TracedTransport[In, Out],
+  underTest: Boolean = false) extends ServerDispatcher[Req, Rep, In, Out](trans) {
+
+  import GenSerialServerDispatcher._
+
+  private[this] val state = new AtomicReference[Future[_]](Idle)
+  private[this] val cancelled = new CancelledRequestException
 
   private[this] def loop(): Future[Unit] = {
     state.set(Idle)
@@ -66,8 +71,11 @@ abstract class GenSerialServerDispatcher[Req, Rep, In, Out](trans: Transport[In,
     }
   }
 
-  // Clear all locals to start the loop; we want a clean slate.
-  private[this] val looping = Local.letClear { loop() }
+  // Clear all locals to start the loop unless being tested; we want a clean slate.
+  private[this] val looping = underTest match {
+    case false => Local.letClear { loop() }
+    case true  => loop()
+  }
 
   trans.onClose ensure {
     looping.raise(cancelled)
@@ -94,17 +102,15 @@ abstract class GenSerialServerDispatcher[Req, Rep, In, Out](trans: Transport[In,
  * Transport errors are considered fatal; the service will be
  * released after any error.
  */
-class SerialServerDispatcher[Req, Rep](
-    trans: Transport[Rep, Req],
-    service: Service[Req, Rep])
-    extends GenSerialServerDispatcher[Req, Rep, Rep, Req](trans) {
+class SerialServerDispatcher[Req, Rep](trans: TracedTransport[Rep, Req], service: Service[Req, Rep],
+  underTest: Boolean = false) extends GenSerialServerDispatcher[Req, Rep, Rep, Req] (
+  trans, underTest) {
 
   trans.onClose ensure {
     service.close()
   }
 
-  protected def dispatch(req: Req, eos: Promise[Unit]) =
-    service(req) ensure eos.setDone()
+  protected def dispatch(req: Req, eos: Promise[Unit]) = service(req) ensure eos.setDone()
 
   protected def handle(rep: Rep) = trans.write(rep)
 }

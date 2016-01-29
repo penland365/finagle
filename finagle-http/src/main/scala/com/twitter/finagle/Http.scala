@@ -12,7 +12,7 @@ import com.twitter.finagle.server._
 import com.twitter.finagle.service.ResponseClassifier
 import com.twitter.finagle.ssl.Ssl
 import com.twitter.finagle.tracing._
-import com.twitter.finagle.transport.Transport
+import com.twitter.finagle.transport.{TracedTransport, Transport}
 import com.twitter.util.{Future, StorageUnit}
 import java.net.{InetSocketAddress, SocketAddress}
 import org.jboss.netty.channel.Channel
@@ -212,8 +212,9 @@ object Http extends Client[Request, Response] with HttpRichClient
       val dtab = new DtabFilter.Finagle[Request]
       val context = new ServerContextFilter[Request, Response]
       val Stats(stats) = params[Stats]
+      val tracedTrans = new TracedTransport(new HttpTransport(transport), HttpServerDispatcher.traceIdFromReq)
 
-      new HttpServerDispatcher(new HttpTransport(transport), dtab andThen context andThen service, stats.scope("dispatch"))
+      new HttpServerDispatcher(tracedTrans, dtab andThen context andThen service, stats.scope("dispatch"))
     }
 
     protected def copy1(

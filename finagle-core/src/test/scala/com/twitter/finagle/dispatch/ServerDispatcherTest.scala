@@ -1,17 +1,20 @@
 package com.twitter.finagle.dispatch
 
-import com.twitter.finagle.Service
 import com.twitter.finagle.context.Contexts
-import com.twitter.finagle.transport.Transport
+import com.twitter.finagle.Service
+import com.twitter.finagle.tracing.{Flags, Record, SpanId, Trace, Tracer, TraceId}
+import com.twitter.finagle.transport.{TracedTransport, Transport}
 import com.twitter.util.{Future, Promise, Time, Local}
 import java.security.cert.X509Certificate
 import org.junit.runner.RunWith
-import org.mockito.Mockito.{when, never, verify, times}
 import org.mockito.Matchers.any
+import org.mockito.Mockito.{never, times, verify, when}
 import org.scalatest.FunSuite
 import org.scalatest.junit.JUnitRunner
 import org.scalatest.mock.MockitoSugar
 import scala.language.reflectiveCalls
+
+import com.twitter.finagle.tracing._
 
 @RunWith(classOf[JUnitRunner])
 class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
@@ -24,70 +27,6 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     val writep = new Promise[Unit]
     when(trans.write(any[String])).thenReturn(writep)
   }
-
-  test("Dispatch one at a time") (new Ctx {
-    val service = mock[Service[String, String]]
-    when(service.close(any[Time])).thenReturn(Future.Done)
-    val disp = new SerialServerDispatcher(trans, service)
-
-    verify(trans).read()
-    verify(trans, never()).write(any[String])
-    verify(service, never()).apply(any[String])
-
-    val servicep = new Promise[String]
-    when(service(any[String])).thenReturn(servicep)
-
-    readp.setValue("ok")
-    verify(service).apply("ok")
-    verify(trans, never()).write(any[String])
-
-    servicep.setValue("ack")
-    verify(trans).write("ack")
-
-    verify(trans).read()
-
-    when(trans.read()).thenReturn(new Promise[String]) // to short circuit
-    writep.setDone()
-
-    verify(trans, times(2)).read()
-  })
-
-  test("Inject the transport certificate if present") (new Ctx {
-    val mockCert = mock[X509Certificate]
-    when(trans.peerCertificate).thenReturn(Some(mockCert))
-    val service = new Service[String, String] {
-      override def apply(request: String): Future[String] = Future.value {
-        if (Contexts.local.get(Transport.peerCertCtx) == Some(mockCert)) "ok" else "not ok"
-      }
-    }
-
-    val disp = new SerialServerDispatcher(trans, service)
-
-    readp.setValue("go")
-    verify(trans).write("ok")
-  })
-
-  test("Clear and delimit com.twitter.util.Local") (new Ctx {
-    val l = new Local[String]
-    var ncall = 0
-
-    val s = new Service[String, String] {
-      def apply(req: String) = {
-        ncall += 1
-        val prev = l() getOrElse "undefined"
-        l() = req
-        Future.value(prev)
-      }
-    }
-
-    l() = "orig"
-    val disp = new SerialServerDispatcher(trans, s)
-
-    readp.setValue("blah")
-    assert(ncall == 1)
-    assert(l() == Some("orig"))
-    verify(trans).write("undefined")
-  })
 
   trait Ictx {
     val onClose = new Promise[Throwable]
@@ -107,7 +46,9 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     val readp = new Promise[String]
     when(trans.read()).thenReturn(readp)
 
-    val disp = new SerialServerDispatcher(trans, service)
+    val f = (s: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+    val tracedTrans = new TracedTransport(trans, f)
+    val disp = new SerialServerDispatcher(tracedTrans, service, true)
   }
 
 
@@ -127,7 +68,7 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     readp.setValue("ok")
     verify(service, times(0)).apply(any[String])
     // This falls through.
-    verify(trans).close()
+    verify(trans).close(any[Time])
     verify(service).close(any[Time])
   })
 
@@ -156,7 +97,9 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     val readp = new Promise[String]
     when(trans.read()).thenReturn(readp)
 
-    val disp = new SerialServerDispatcher(trans, service)
+    val f = (a: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+    val tracedTrans = new TracedTransport(trans, f)
+    val disp = new SerialServerDispatcher(tracedTrans, service, true)
     verify(trans).read()
   }
 
@@ -195,8 +138,65 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     verify(trans, times(0)).close()
 
     writep.setDone()
-    verify(trans).close()
+    verify(trans).close(any[Time])
     onClose.setValue(new Exception("closed!"))
     verify(service).close(any[Time])
+  })
+
+  test("WireSend and WireRecv Annotations") (new Ctx {
+    val tracer = mock[Tracer]
+    Trace.letTracer(tracer) {
+      val service = mock[Service[String, String]]
+      when(service.close(any[Time])).thenReturn(Future.Done)
+      val f = (a: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+      val tracedTrans = new TracedTransport(trans, f)
+      val disp = new SerialServerDispatcher(tracedTrans, service, true)
+
+      verify(trans).read()
+      verify(trans, never()).write(any[String])
+      verify(service, never()).apply(any[String])
+
+      val servicep = new Promise[String]
+      when(service(any[String])).thenReturn(servicep)
+
+      readp.setValue("ok")
+      verify(service).apply("ok")
+      verify(trans, never()).write(any[String])
+
+      servicep.setValue("ack")
+      verify(trans).write("ack")
+
+      verify(trans).read()
+
+      when(trans.read()).thenReturn(new Promise[String]) // to short circuit
+      writep.setDone()
+
+      verify(trans, times(2)).read()
+    }
+    verify(tracer, times(2)).record(any[Record])
+  })
+
+  test("no tracing when disabled") (new Ctx {
+    val tracer = mock[Tracer]
+    Trace.letTracer(tracer) {
+      val service = mock[Service[String, String]]
+      when(service.close(any[Time])).thenReturn(Future.Done)
+      val f = (a: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+      val tracedTrans = new TracedTransport(trans, f)
+      val disp = new SerialServerDispatcher(tracedTrans, service, false)
+
+      val servicep = new Promise[String]
+      when(service(any[String])).thenReturn(servicep)
+
+      readp.setValue("ok")
+      verify(service).apply("ok")
+      verify(trans, never()).write(any[String])
+
+      when(trans.read()).thenReturn(new Promise[String]) // to short circuit
+      writep.setDone()
+
+      verify(trans, times(1)).read()
+    }
+    verify(tracer, times(0)).record(any[Record])
   })
 }

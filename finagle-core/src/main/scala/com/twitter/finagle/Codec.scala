@@ -3,11 +3,12 @@ package com.twitter.finagle
 import com.twitter.finagle.dispatch.{GenSerialClientDispatcher, SerialClientDispatcher, SerialServerDispatcher}
 import com.twitter.finagle.netty3.transport.ChannelTransport
 import com.twitter.finagle.stats.StatsReceiver
-import com.twitter.finagle.tracing.TraceInitializerFilter
-import com.twitter.finagle.transport.Transport
+import com.twitter.finagle.tracing.{Trace, TraceId, TraceInitializerFilter}
+import com.twitter.finagle.transport.{TracedTransport, Transport}
 import com.twitter.util.Closable
 import java.net.{InetSocketAddress, SocketAddress}
 import org.jboss.netty.channel.{Channel, ChannelPipeline, ChannelPipelineFactory}
+
 
 /**
  * Codecs provide protocol encoding and decoding via netty pipelines
@@ -65,9 +66,12 @@ trait Codec[Req, Rep] {
 
   def newServerDispatcher(
     transport: Transport[Any, Any],
-    service: Service[Req, Rep]
-  ): Closable =
-    new SerialServerDispatcher[Req, Rep](Transport.cast[Rep, Req](transport), service)
+    service: Service[Req, Rep],
+    f: (Any) => TraceId = (r: Any) => Trace.id): Closable = {
+    val trans = Transport.cast[Rep, Req](transport)
+    val traced = new TracedTransport(trans, f)
+    new SerialServerDispatcher[Req, Rep](traced, service)
+  }
 
   /**
    * Is this Codec OK for failfast? This is a temporary hack to
