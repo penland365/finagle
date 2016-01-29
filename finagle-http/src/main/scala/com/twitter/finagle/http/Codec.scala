@@ -217,7 +217,8 @@ case class Http(
 
       override def newServerDispatcher(
         transport: Transport[Any, Any],
-        service: Service[Request, Response]
+        service: Service[Request, Response],
+        f: (Any) => TraceId = TraceInfo.TraceIdFromRequest
       ): Closable =
         new HttpServerDispatcher(new HttpTransport(transport), service)
 
@@ -277,6 +278,12 @@ object HttpTracing {
 
 private object TraceInfo {
   import HttpTracing._
+
+  // This should actually work - needs a refactor from a function extracted 
+  // from letTraceIdFromRequestHeaders
+  val TraceIdFromRequest: (Any) => TraceId = (a: Any) => a match {
+    case _ => Trace.id
+  }
 
   def letTraceIdFromRequestHeaders[R](request: Request)(f: => R): R = {
     val id = if (Header.Required.forall { request.headers.contains(_) }) {
