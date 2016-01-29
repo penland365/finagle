@@ -2,7 +2,8 @@ package com.twitter.finagle.server
 
 import com.twitter.finagle.Stack.Params
 import com.twitter.finagle._
-import com.twitter.finagle.transport.Transport
+import com.twitter.finagle.tracing.{Flags, TraceId, SpanId}
+import com.twitter.finagle.transport.{AnnotatedTransport, Transport}
 import com.twitter.finagle.dispatch.SerialServerDispatcher
 import com.twitter.finagle.netty3.Netty3Listener
 import com.twitter.io.Charsets
@@ -33,8 +34,10 @@ private[finagle] trait StringServer {
     protected type Out = String
 
     protected def newListener() = Netty3Listener(StringServerPipeline, params)
-    protected def newDispatcher(transport: Transport[In, Out], service: Service[String, String]) =
-      new SerialServerDispatcher(transport, service)
+    protected def newDispatcher(transport: Transport[In, Out], service: Service[String, String]) = {
+      val f = (a: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+      new SerialServerDispatcher(new AnnotatedTransport(transport, f), service)
+    }
   }
 
   val stringServer = Server()
