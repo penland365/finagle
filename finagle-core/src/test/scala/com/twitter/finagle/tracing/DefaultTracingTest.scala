@@ -83,7 +83,7 @@ class DefaultTracingTest extends FunSuite with StringClient with StringServer {
   test("core events are traced in the DefaultClient/DefaultServer") {
     testCoreTraces { (serverTracer, clientTracer) =>
       val f = (t: Transport[String, String], s: Service[String, String]) => {
-        val g = (s: String) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+        val g = (a: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
         val trans = new TracedTransport(t, g)
         new SerialServerDispatcher(trans, s)
       }

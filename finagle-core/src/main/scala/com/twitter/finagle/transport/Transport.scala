@@ -13,8 +13,7 @@ import com.twitter.finagle.tracing.{Annotation, Trace, TraceId}
 
 // Mapped: ideally via a util-codec?
 
-
-final class TracedTransport[In, Out](trans: Transport[In, Out], f: (Out) => TraceId) 
+final class TracedTransport[In, Out](trans: Transport[In, Out], f: (Out) => TraceId)
   extends Transport[In, Out] {
 
   def read(): Future[Out] = trans.read() flatMap { req =>

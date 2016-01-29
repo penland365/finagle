@@ -46,8 +46,7 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     val readp = new Promise[String]
     when(trans.read()).thenReturn(readp)
 
-    val f = (s: String) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
-    //val tracedTrans = mock[TracedTransport[String, String]] //new TracedTransport(trans, f)
+    val f = (s: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
     val tracedTrans = new TracedTransport(trans, f)
     val disp = new SerialServerDispatcher(tracedTrans, service, true)
   }
@@ -98,7 +97,7 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     val readp = new Promise[String]
     when(trans.read()).thenReturn(readp)
 
-    val f = (s: String) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+    val f = (a: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
     val tracedTrans = new TracedTransport(trans, f)
     val disp = new SerialServerDispatcher(tracedTrans, service, true)
     verify(trans).read()
@@ -149,7 +148,7 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     Trace.letTracer(tracer) {
       val service = mock[Service[String, String]]
       when(service.close(any[Time])).thenReturn(Future.Done)
-      val f = (s: String) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+      val f = (a: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
       val tracedTrans = new TracedTransport(trans, f)
       val disp = new SerialServerDispatcher(tracedTrans, service, true)
 
@@ -182,7 +181,7 @@ class SerialServerDispatcherTest extends FunSuite with MockitoSugar {
     Trace.letTracer(tracer) {
       val service = mock[Service[String, String]]
       when(service.close(any[Time])).thenReturn(Future.Done)
-      val f = (s: String) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+      val f = (a: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
       val tracedTrans = new TracedTransport(trans, f)
       val disp = new SerialServerDispatcher(tracedTrans, service, false)
 

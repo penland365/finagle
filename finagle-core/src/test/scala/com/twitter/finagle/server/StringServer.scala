@@ -36,7 +36,7 @@ private[finagle] trait StringServer {
 
     protected def newListener() = Netty3Listener(StringServerPipeline, params)
     protected def newDispatcher(transport: Transport[In, Out], service: Service[String, String]) = {
-      val f = (s: String) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+      val f = (a: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
       new SerialServerDispatcher(new TracedTransport(transport, f), service)
     }
   }

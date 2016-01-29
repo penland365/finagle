@@ -371,6 +371,7 @@ object Finagle extends Build {
     libraryDependencies ++= Seq(
       util("codec"), util("logging"),
       "commons-lang" % "commons-lang" % "2.6",
+      "com.twitter" %% "finagle-core" % "6.31.0-SNAPSHOT",
       "com.google.guava" % "guava" % "16.0.1"
     )
   ).dependsOn(finagleCore)
@@ -473,7 +474,10 @@ object Finagle extends Build {
       sharedSettings
   ).settings(
     name := "finagle-mux",
-    libraryDependencies ++= Seq("com.twitter.common" % "stats-util" % "0.0.58")
+    libraryDependencies ++= Seq(
+      "com.twitter.common" % "stats-util" % "0.0.58",
+      "com.twitter" %% "finagle-core" % "6.31.0-SNAPSHOT"
+    )
   ).dependsOn(finagleCore)
 
   lazy val finagleThriftMux = Project(

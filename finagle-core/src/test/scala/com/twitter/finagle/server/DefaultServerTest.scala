@@ -95,7 +95,7 @@ class DefaultServerTest extends FunSpec with MockitoSugar {
 
       val serviceTransport: (Transport[Try[Int], Try[Int]], Service[Try[Int], Try[Int]]) => Closable = 
         (t: Transport[Try[Int], Try[Int]], s: Service[Try[Int], Try[Int]]) => {
-          val g = (t: Try[Int]) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+          val g = (a: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
           new SerialServerDispatcher(new TracedTransport(t, g), s)
       }
 

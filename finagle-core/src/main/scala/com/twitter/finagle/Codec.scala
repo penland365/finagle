@@ -67,7 +67,7 @@ trait Codec[Req, Rep] {
   def newServerDispatcher(
     transport: Transport[Any, Any],
     service: Service[Req, Rep],
-    f: (Req) => TraceId = (r: Req) => Trace.id): Closable = {
+    f: (Any) => TraceId = (r: Any) => Trace.id): Closable = {
     val trans = Transport.cast[Rep, Req](transport)
     val traced = new TracedTransport(trans, f)
     new SerialServerDispatcher[Req, Rep](traced, service)

@@ -5,7 +5,7 @@ import com.twitter.finagle.{ChannelClosedException, Service, Status}
 import com.twitter.finagle.http
 import com.twitter.finagle.http.{BadHttpRequest, Request, Response, Version}
 import com.twitter.finagle.netty3.ChannelBufferBuf
-import com.twitter.finagle.transport.{QueueTransport, Transport}
+import com.twitter.finagle.transport.{QueueTransport, TracedTransport, Transport}
 import com.twitter.io.{Reader, Buf}
 import com.twitter.util.{Await, Future, Promise}
 import org.jboss.netty.buffer.ChannelBuffers
@@ -29,7 +29,8 @@ class HttpServerDispatcherTest extends FunSuite {
   test("invalid message") {
     val (in, out) = mkPair[Any, Any]
     val service = Service.mk { req: Request => Future.value(Response()) }
-    val disp = new HttpServerDispatcher(out, service)
+    val trans = new TracedTransport(out, HttpServerDispatcher.traceIdFromReq)
+    val disp = new HttpServerDispatcher(trans, service)
 
     in.write("invalid")
     Await.ready(out.onClose)
@@ -39,7 +40,8 @@ class HttpServerDispatcherTest extends FunSuite {
   test("bad request") {
     val (in, out) = mkPair[Any, Any]
     val service = Service.mk { req: Request => Future.value(Response()) }
-    val disp = new HttpServerDispatcher(out, service)
+    val trans = new TracedTransport(out, HttpServerDispatcher.traceIdFromReq)
+    val disp = new HttpServerDispatcher(trans, service)
 
     in.write(BadHttpRequest(new Exception()))
     Await.result(in.read)
@@ -49,7 +51,8 @@ class HttpServerDispatcherTest extends FunSuite {
   test("streaming request body") {
     val service = Service.mk { req: Request => ok(req.reader) }
     val (in, out) = mkPair[Any, Any]
-    val disp = new HttpServerDispatcher(out, service)
+    val trans = new TracedTransport(out, HttpServerDispatcher.traceIdFromReq)
+    val disp = new HttpServerDispatcher(trans, service)
 
     val req = Request()
     req.setChunked(true)
@@ -66,7 +69,8 @@ class HttpServerDispatcherTest extends FunSuite {
     val service = Service.mk { _: Request => promise }
 
     val (in, out) = mkPair[Any, Any]
-    val disp = new HttpServerDispatcher(out, service)
+    val trans = new TracedTransport(out, HttpServerDispatcher.traceIdFromReq)
+    val disp = new HttpServerDispatcher(trans, service)
 
     in.write(Request().httpRequest)
 
@@ -81,7 +85,8 @@ class HttpServerDispatcherTest extends FunSuite {
     val service = Service.mk { _: Request => Future.value(res) }
 
     val (in, out) = mkPair[Any, Any]
-    val disp = new HttpServerDispatcher(out, service)
+    val trans = new TracedTransport(out, HttpServerDispatcher.traceIdFromReq)
+    val disp = new HttpServerDispatcher(trans, service)
 
     req.response.setChunked(true)
     in.write(req.httpRequest)
