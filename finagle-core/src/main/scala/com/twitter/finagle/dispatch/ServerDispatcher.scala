@@ -70,7 +70,8 @@ abstract class GenSerialServerDispatcher[Req, Rep, In, Out](trans: Transport[In,
         } finally Local.restore(save)
         p map { res => (res, eos) }
       } else Eof
-    } flatMap { case (rep, eos) => println(Trace.id); Future.join(handle(rep), eos).unit
+    } flatMap { case (rep, eos) =>
+      Future.join(handle(rep), eos).unit
     } respond {
       case Return(()) if state.get ne Closed =>
         loop()
@@ -112,7 +113,7 @@ class SerialServerDispatcher[Req, Rep](
     trans: Transport[Rep, Req],
     service: Service[Req, Rep],
     config: ServerDispatcherConfig[Req, Rep] = new ServerDispatcherConfig(
-      tracer = new BufferingTracer(), (r: Req) => Trace.nextId, (r: Rep) => Trace.nextId)
+      tracer = new BufferingTracer(), (r: Req) => Trace.id, (r: Rep) => Trace.id)
     )
     extends GenSerialServerDispatcher[Req, Rep, Rep, Req](trans, config) {
 
@@ -120,8 +121,16 @@ class SerialServerDispatcher[Req, Rep](
     service.close()
   }
 
-  protected def dispatch(req: Req, eos: Promise[Unit]) =
-    service(req) ensure eos.setDone()
+  protected def dispatch(req: Req, eos: Promise[Unit]) = {
+    Trace.letTracerAndId(config.tracer, config.fReq(req)) {
+      Trace.record(Annotation.WireRecv)
+      service(req) ensure eos.setDone()
+    }
+  }
 
-  protected def handle(rep: Rep) = trans.write(rep)
+  protected def handle(rep: Rep) = {
+    Trace.letTracerAndId(config.tracer, config.fRep(rep)) {
+      trans.write(rep).onSuccess(RecordWireSend)
+    }
+  }
 }
