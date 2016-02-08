@@ -5,9 +5,10 @@ import com.twitter.conversions.time._
 import com.twitter.finagle._
 import com.twitter.finagle.client.{Bridge, DefaultClient}
 import com.twitter.finagle.dispatch._
-import com.twitter.finagle.transport.{QueueTransport, Transport}
-import com.twitter.util._
 import com.twitter.finagle.stats.StatsReceiver
+import com.twitter.finagle.tracing.{Flags, TraceId, SpanId}
+import com.twitter.finagle.transport.{AnnotatedTransport, QueueTransport, Transport}
+import com.twitter.util._
 import java.net.{SocketAddress, InetAddress, InetSocketAddress}
 import org.junit.runner.RunWith
 import org.mockito.Matchers.any
@@ -92,7 +93,10 @@ class DefaultServerTest extends FunSpec with MockitoSugar {
       when(mockConnHandle.close(any[Time])) thenReturn Future.Done
 
       val serviceTransport: (Transport[Try[Int], Try[Int]], Service[Try[Int], Try[Int]]) => Closable =
-        new SerialServerDispatcher(_, _)
+        (t: Transport[Try[Int], Try[Int]], s: Service[Try[Int], Try[Int]]) => {
+          val g = (a: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+          new SerialServerDispatcher(new AnnotatedTransport(t, g), s)
+      }
 
       val server: Server[Try[Int], Try[Int]] = DefaultServer[Try[Int], Try[Int], Try[Int], Try[Int]](name, listener, serviceTransport)
       val socket = new InetSocketAddress(InetAddress.getLoopbackAddress, 0)

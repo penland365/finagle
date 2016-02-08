@@ -4,16 +4,17 @@ import com.twitter.conversions.time._
 import com.twitter.finagle._
 import com.twitter.finagle.builder.{ClientBuilder, ServerBuilder}
 import com.twitter.finagle.dispatch.GenSerialClientDispatcher
-import com.twitter.finagle.transport.Transport
 import com.twitter.finagle.stats.StatsReceiver
+import com.twitter.finagle.tracing.TraceId
+import com.twitter.finagle.transport.Transport
 import com.twitter.io.{Buf, Reader, Writer}
 import com.twitter.util.{Await, Closable, Future, Promise}
 import java.net.{InetSocketAddress, SocketAddress}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import org.jboss.netty.channel.Channel
 import org.junit.runner.RunWith
-import org.scalatest.FunSuite
 import org.scalatest.concurrent.Eventually
+import org.scalatest.FunSuite
 import org.scalatest.junit.JUnitRunner
 
 @RunWith(classOf[JUnitRunner])
@@ -353,7 +354,8 @@ object StreamingTest {
           codec.newClientDispatcher(cmod(transport), params)
         override def newServerDispatcher(
           transport: Transport[Any, Any],
-          service: Service[Request, Response]
+          service: Service[Request, Response],
+          f: (Any) => TraceId = TraceInfo.TraceIdFromRequest
         ) = codec.newServerDispatcher(smod(transport), service)
       }
 

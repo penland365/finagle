@@ -1,12 +1,12 @@
 package com.twitter.finagle.http.codec
 
-import com.twitter.finagle.Service
 import com.twitter.finagle.dispatch.GenSerialServerDispatcher
 import com.twitter.finagle.http._
 import com.twitter.finagle.http.netty.Bijections._
 import com.twitter.finagle.netty3.ChannelBufferBuf
+import com.twitter.finagle.Service
 import com.twitter.finagle.stats.{StatsReceiver, DefaultStatsReceiver, RollupStatsReceiver}
-import com.twitter.finagle.transport.Transport
+import com.twitter.finagle.transport.{AnnotatedTransport, Transport}
 import com.twitter.io.{Reader, BufReader}
 import com.twitter.logging.Logger
 import com.twitter.util.{Future, Promise, Throwables}
@@ -17,11 +17,14 @@ import org.jboss.netty.handler.codec.http.{HttpRequest, HttpResponse}
 class HttpServerDispatcher(
   trans: Transport[Any, Any],
   service: Service[Request, Response],
-  stats: StatsReceiver) extends GenSerialServerDispatcher[Request, Response, Any, Any](trans) {
+  stats: StatsReceiver) extends GenSerialServerDispatcher[Request, Response, Any, Any](
+    new AnnotatedTransport(trans, TraceInfo.TraceIdFromRequest)) {
 
   def this(
     trans: Transport[Any, Any],
-    service: Service[Request, Response]) = this(trans, service, DefaultStatsReceiver)
+    service: Service[Request, Response]) = this(
+      new AnnotatedTransport(trans, TraceInfo.TraceIdFromRequest),
+      service, DefaultStatsReceiver)
 
   private[this] val failureReceiver = new RollupStatsReceiver(stats.scope("stream")).scope("failures")
 

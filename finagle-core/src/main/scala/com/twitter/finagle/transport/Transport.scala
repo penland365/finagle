@@ -4,6 +4,7 @@ import com.twitter.concurrent.AsyncQueue
 import com.twitter.finagle.context.Contexts
 import com.twitter.finagle.{Stack, Status}
 import com.twitter.finagle.ssl
+import com.twitter.finagle.tracing.{Annotation, Trace, TraceId}
 import com.twitter.io.{Buf, Reader, Writer}
 import com.twitter.util.{Closable, Future, Promise, Time, Throw, Return, Duration}
 import java.net.SocketAddress
@@ -300,4 +301,49 @@ class QueueTransport[In, Out](writeq: AsyncQueue[In], readq: AsyncQueue[Out])
   val localAddress = new SocketAddress{}
   val remoteAddress = new SocketAddress{}
   def peerCertificate: Option[Certificate] = None
+}
+
+/**
+  * An annotated implementation of
+  * [[com.twitter.finagle.transport.Transport Transport]]. Wraps an existing
+  * [[com.twitter.finagle.transport.Transport Transport]]. To be used in 
+  * conjunction with any
+  * [[com.twitter.finagle.dispatcher.ServerDispatcher ServerDispatcher]].
+  * @tparam In the type of input messages
+  * @tparam Out the type of output messages
+  * @param trans the
+  * [[com.twitter.finagle.transport.Transport transporter]] to be Annotated
+  * @param f a function ```Out```-message-type => 
+  * [[com.twitter.finagle.tracing.TraceId TraceId]]
+  */
+final class AnnotatedTransport[In, Out](trans: Transport[In, Out], f: (Out) => TraceId)
+  extends Transport[In, Out] {
+
+  def read(): Future[Out] = trans.read() flatMap { req =>
+    val traceId = f(req)
+    Trace.letId(traceId) {
+      Trace.record(Annotation.WireRecv)
+      Future.value(req)
+    }
+  }
+
+  def write(req: In): Future[Unit] = trans.write(req).onSuccess { RecordWireSend }
+
+  def localAddress: SocketAddress          = trans.localAddress
+  def remoteAddress: SocketAddress         = trans.remoteAddress
+  def status: Status                       = trans.status
+  val onClose: Future[Throwable]           = trans.onClose
+  def peerCertificate: Option[Certificate] = trans.peerCertificate
+  def close(deadline: Time): Future[Unit]  = trans.close(deadline)
+
+  private[this] val RecordWireSend: Unit => Unit = _ => Trace.record(Annotation.WireSend)
+}
+
+object AnnotatedTransport {
+
+  /**
+    * A default implementation for the function 
+    * ```Out``=>[[com.twitter.finagle.tracing.TraceId TraceId]]
+    */
+  val AnyToTraceId: (Any) => TraceId = (a: Any) => Trace.nextId
 }

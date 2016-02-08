@@ -1,14 +1,14 @@
 package com.twitter.finagle.tracing
 
 import com.twitter.conversions.time._
-import com.twitter.finagle.Stack
 import com.twitter.finagle._
 import com.twitter.finagle.builder.{ClientBuilder, ServerBuilder}
 import com.twitter.finagle.client._
 import com.twitter.finagle.dispatch._
 import com.twitter.finagle.netty3._
 import com.twitter.finagle.server._
-import com.twitter.finagle.transport.Transport
+import com.twitter.finagle.Stack
+import com.twitter.finagle.transport.{AnnotatedTransport, Transport}
 import com.twitter.finagle.{param => fparam}
 import com.twitter.io.Charsets
 import com.twitter.util._
@@ -82,10 +82,15 @@ class DefaultTracingTest extends FunSuite with StringClient with StringServer {
 
   test("core events are traced in the DefaultClient/DefaultServer") {
     testCoreTraces { (serverTracer, clientTracer) =>
+      val f = (t: Transport[String, String], s: Service[String, String]) => {
+        val g = (a: Any) => TraceId(None, None, SpanId(71L), None, Flags(Flags.Debug))
+        val trans = new AnnotatedTransport(t, g)
+        new SerialServerDispatcher(trans, s)
+      }
       val server = DefaultServer[String, String, String, String](
         name = "theServer",
         listener = Netty3Listener("theServer", StringServerPipeline),
-        serviceTransport = new SerialServerDispatcher(_, _),
+        serviceTransport = f,
         tracer = serverTracer)
 
       val client = DefaultClient[String, String](
