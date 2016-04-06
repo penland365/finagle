@@ -1,13 +1,15 @@
 package com.twitter.finagle.server
 
 import com.twitter.conversions.time._
-import com.twitter.finagle.Stack.Param
+import com.twitter.finagle.Stack.{Role, Param}
 import com.twitter.finagle._
 import com.twitter.finagle.filter._
+import com.twitter.finagle.dispatch.ServerDispatcherInitializer
 import com.twitter.finagle.param._
 import com.twitter.finagle.service.{DeadlineFilter, StatsFilter, TimeoutFilter}
 import com.twitter.finagle.stack.Endpoint
 import com.twitter.finagle.stats.ServerStatsReceiver
+import com.twitter.finagle.tracing.TraceInitializerFilter.Module
 import com.twitter.finagle.tracing._
 import com.twitter.finagle.transport.Transport
 import com.twitter.jvm.Jvm
@@ -18,7 +20,18 @@ import java.util.concurrent.ConcurrentHashMap
 import scala.collection.JavaConverters._
 
 object StackServer {
+
   private[this] val newJvmFilter = new MkJvmFilter(Jvm())
+
+  private[this] class JvmTracing[Req, Rep] extends Stack.Module1[param.Tracer, ServiceFactory[Req, Rep]] {
+    override def role: Role = Role.jvmTracing
+    override def description: String = "Server-side JVM tracing"
+    override def make(_tracer: param.Tracer, next: ServiceFactory[Req, Rep]): ServiceFactory[Req, Rep] = {
+      val param.Tracer(tracer) = _tracer
+      if (tracer.isNull) next
+      else newJvmFilter[Req, Rep].andThen(next)
+    }
+  }
 
   /**
    * Canonical Roles for each Server-related Stack modules.
@@ -71,8 +84,7 @@ object StackServer {
     stk.push(RequestSemaphoreFilter.module)
     stk.push(MaskCancelFilter.module)
     stk.push(ExceptionSourceFilter.module)
-    stk.push(Role.jvmTracing, ((next: ServiceFactory[Req, Rep]) =>
-      newJvmFilter[Req, Rep]() andThen next))
+    stk.push(new JvmTracing)
     stk.push(ServerStatsFilter.module)
     stk.push(Role.protoTracing, identity[ServiceFactory[Req, Rep]](_))
     stk.push(ServerTracingFilter.module)
@@ -137,6 +149,7 @@ trait StdStackServer[Req, Rep, This <: StdStackServer[Req, Rep, This]]
   with Stack.Parameterized[This]
   with CommonParams[This]
   with WithServerTransport[This]
+  with WithServerDispatcher[This]
   with WithServerAdmissionControl[This] { self =>
 
   /**
@@ -163,7 +176,8 @@ trait StdStackServer[Req, Rep, This <: StdStackServer[Req, Rep, This]]
    *
    * @see [[com.twitter.finagle.dispatch.GenSerialServerDispatcher]]
    */
-  protected def newDispatcher(transport: Transport[In, Out], service: Service[Req, Rep]): Closable
+  protected def newDispatcher(transport: Transport[In, Out], service: Service[Req, Rep],
+    init: ServerDispatcherInitializer): Closable
 
   /**
    * Creates a new StackServer with parameter `p`.
@@ -206,6 +220,11 @@ trait StdStackServer[Req, Rep, This <: StdStackServer[Req, Rep, This]]
       val Reporter(reporter) = params[Reporter]
       val Stats(stats) = params[Stats]
       val Label(label) = params[Label]
+
+      val param.ReqRepToTraceId(fReq, fRep) = params[param.ReqRepToTraceId]
+      val com.twitter.finagle.param.Tracer(tracer) = params[com.twitter.finagle.param.Tracer]
+      val dispatcherInit = new ServerDispatcherInitializer(tracer, fReq, fRep)
+
       // For historical reasons, we have to respect the ServerRegistry
       // for naming addresses (i.e. label=addr). Until we deprecate
       // its usage, it takes precedence for identifying a server as
@@ -249,7 +268,7 @@ trait StdStackServer[Req, Rep, This <: StdStackServer[Req, Rep, This]]
       val underlying = listener.listen(addr) { transport =>
         serviceFactory(newConn(transport)) respond {
           case Return(service) =>
-            val d = server.newDispatcher(transport, service)
+            val d = server.newDispatcher(transport, service, dispatcherInit)
             connections.add(d)
             transport.onClose ensure connections.remove(d)
           case Throw(exc) =>
@@ -260,7 +279,8 @@ trait StdStackServer[Req, Rep, This <: StdStackServer[Req, Rep, This]]
             val d = server.newDispatcher(
               transport,
               Service.const(Future.exception(
-                Failure.rejected("Terminating session and ignoring request", exc)))
+                Failure.rejected("Terminating session and ignoring request", exc))),
+              dispatcherInit
             )
             connections.add(d)
             transport.onClose ensure connections.remove(d)
